@@ -1,8 +1,60 @@
-#ifndef WEB_PAGE_H
-#define WEB_PAGE_H
+#include <WiFi.h>
+#include <WebServer.h>
+#include <FastLED.h>
+#include <math.h>
+#include <Preferences.h>
 
-// Embedded HTML/CSS/JavaScript for the web interface
-// This file contains the complete user interface served to connected clients
+// WiFi Settings
+const char* AP_SSID = "TrackPacer";
+const char* AP_PASSWORD = "pacer2024";
+
+// LED Configuration 
+#define LED_PIN 15
+
+// --- Scalable Configuration ---
+#define LOGICAL_UNITS_PER_SEGMENT 50  // 50 chips per 5-meter segment
+int TOTAL_SEGMENTS = 1;               // Default: 1 segment (5 meters total), updated by website
+#define LEDS_PER_SEGMENT 20            // Length of the pacer in logical units (5 chips long)
+
+// Pacer Configuration
+#define MAX_PACERS 3
+
+// The leds array must be sized to the maximum possible segments (e.g., 10 segments * 50 units = 500)
+#define MAX_LOGICAL_LEDS 500 
+CRGB leds[MAX_LOGICAL_LEDS];
+int current_NUM_LEDS = LOGICAL_UNITS_PER_SEGMENT; // Starts at 50
+
+WebServer server(80);
+Preferences preferences;
+
+struct Pacer {
+  bool enabled;
+  float timePerLap;      // seconds to complete 5m lap
+  int startPosition;     // meters (0m to 4m)
+  CRGB color;
+  float currentPosition; // Position in logical units (0 to current_NUM_LEDS - 1)
+  unsigned long lastUpdate;
+};
+
+Pacer pacers[MAX_PACERS];
+bool systemRunning = false;
+unsigned long lastStatusUpdate = 0;
+int connectedClients = 0;
+
+// Function Prototypes 
+void handleRoot();
+void handleCommand();
+void handleSegments();
+void handleStatus();
+void handleSavePreset();
+void handleLoadPreset();
+void handleListPresets();
+void handleDeletePreset();
+CRGB hexToColor(String hex);
+void parseStartCommand(String cmd);
+void updatePacers();
+void renderLEDs();
+String generatePacerPositions();
 
 const char HTML_PAGE[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
@@ -13,29 +65,29 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
     <title>Track LED Pacer</title>
     <style>
         * { box-sizing: border-box; }
-        body {
+        body { 
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
             background: linear-gradient(135deg, #012169 0%, #003087 100%);
-            color: white;
+            color: white; 
             padding: 0;
             margin: 0;
             min-height: 100vh;
         }
-        .container {
-            max-width: 480px;
-            margin: 0 auto;
+        .container { 
+            max-width: 480px; 
+            margin: 0 auto; 
             padding: 20px 16px;
         }
-
-        h1 {
-            text-align: center;
-            font-size: 1.75em;
+        
+        h1 { 
+            text-align: center; 
+            font-size: 1.75em; 
             margin: 0 0 8px 0;
             color: white;
             font-weight: 700;
             letter-spacing: 0.5px;
         }
-
+        
         .subtitle {
             text-align: center;
             color: rgba(255, 255, 255, 0.8);
@@ -43,7 +95,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             margin: 0 0 24px 0;
             font-weight: 500;
         }
-
+        
         /* Connection Status */
         .connection-status {
             position: fixed;
@@ -76,8 +128,8 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
         }
-
-        .card {
+        
+        .card { 
             background: white;
             color: #012169;
             border-radius: 16px;
@@ -85,7 +137,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             margin-bottom: 16px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.1);
         }
-
+        
         /* Track Visualization */
         .track-viz {
             background: #f8f9fa;
@@ -202,9 +254,9 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             white-space: nowrap;
             box-shadow: 0 2px 4px rgba(0,0,0,0.2);
         }
-
+        
         /* Info Banner */
-        .info-banner {
+        .info-banner { 
             background: white;
             color: #012169;
             padding: 12px 16px;
@@ -215,7 +267,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             font-size: 1em;
             box-shadow: 0 2px 8px rgba(0,0,0,0.08);
         }
-
+        
         /* Running Stats Display */
         .running-stats {
             background: white;
@@ -254,9 +306,9 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
         .stat-value.large {
             font-size: 2.5em;
         }
-
+        
         /* Segment Control */
-        .segment-control {
+        .segment-control { 
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -267,12 +319,12 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             gap: 12px;
             border: 2px solid #e5e7eb;
         }
-        .segment-control label {
-            font-weight: 600;
+        .segment-control label { 
+            font-weight: 600; 
             font-size: 0.9em;
             color: #012169;
         }
-        .segment-control input {
+        .segment-control input { 
             width: 70px;
             padding: 8px;
             border: 2px solid #012169;
@@ -297,15 +349,15 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
         .segment-control button:active {
             transform: scale(0.95);
         }
-
+        
         /* Control Buttons */
-        .controls {
+        .controls { 
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 12px;
             margin-bottom: 16px;
         }
-        button {
+        button { 
             padding: 16px;
             font-size: 1.1em;
             font-weight: 700;
@@ -319,9 +371,9 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
         button:active {
             transform: scale(0.95);
         }
-        .btn-start {
-            background: #10b981;
-            color: white;
+        .btn-start { 
+            background: #10b981; 
+            color: white; 
             position: relative;
             overflow: hidden;
         }
@@ -340,16 +392,16 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             0%, 100% { box-shadow: 0 0 16px rgba(16, 185, 129, 0.5); }
             50% { box-shadow: 0 0 24px rgba(16, 185, 129, 0.8); }
         }
-        .btn-stop {
-            background: #ef4444;
-            color: white;
+        .btn-stop { 
+            background: #ef4444; 
+            color: white; 
             opacity: 0.6;
             transition: all 0.2s ease;
         }
         .btn-stop.active {
             opacity: 1;
         }
-
+        
         /* Preset Section */
         .preset-section {
             background: #f8f9fa;
@@ -428,7 +480,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             background: #ef4444;
             color: white;
         }
-
+        
         /* Pacer Cards */
         .pacer-card {
             background: #f8f9fa;
@@ -444,7 +496,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
         .pacer-card.collapsed {
             padding: 12px 16px;
         }
-
+        
         .pacer-header {
             display: flex;
             justify-content: space-between;
@@ -460,20 +512,20 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             padding-bottom: 0;
             border-bottom: none;
         }
-
+        
         .pacer-header-left {
             display: flex;
             align-items: center;
             gap: 12px;
             flex: 1;
         }
-
+        
         .pacer-title {
             font-size: 1.1em;
             font-weight: 700;
             color: #012169;
         }
-
+        
         .pacer-summary {
             font-size: 0.85em;
             color: #6b7280;
@@ -483,7 +535,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
         .pacer-card.collapsed .pacer-summary {
             display: block;
         }
-
+        
         .pacer-expand-icon {
             color: #6b7280;
             font-size: 0.8em;
@@ -493,7 +545,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
         .pacer-card.collapsed .pacer-expand-icon {
             transform: rotate(180deg);
         }
-
+        
         /* Toggle Switch */
         .toggle-switch {
             position: relative;
@@ -520,7 +572,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
         }
         input:checked + .toggle-slider { background-color: #10b981; }
         input:checked + .toggle-slider:before { transform: translateX(26px); }
-
+        
         /* Time Input Mode Selector */
         .time-mode-selector {
             display: flex;
@@ -547,14 +599,14 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             background: #012169;
             color: white;
         }
-
+        
         .time-input-container {
             display: none;
         }
         .time-input-container.active {
             display: block;
         }
-
+        
         .time-inputs {
             display: flex;
             gap: 8px;
@@ -578,7 +630,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             color: #012169;
             font-size: 0.95em;
         }
-
+        
         /* Color Palette */
         .color-section {
             margin: 16px 0;
@@ -603,14 +655,14 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             transition: all 0.2s ease;
             box-shadow: 0 2px 6px rgba(0,0,0,0.1);
         }
-        .color-option.selected {
+        .color-option.selected { 
             border-color: #012169;
             transform: scale(1.05);
             box-shadow: 0 4px 12px rgba(1,33,105,0.3);
         }
-
+        
         /* Pace Display */
-        .pace-value {
+        .pace-value { 
             font-size: 2.5em;
             font-weight: 800;
             text-align: center;
@@ -618,9 +670,9 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             color: #012169;
             font-family: 'SF Mono', 'Consolas', monospace;
         }
-
+        
         /* Range Slider */
-        input[type="range"] {
+        input[type="range"] { 
             width: 100%;
             margin: 12px 0;
             height: 8px;
@@ -647,12 +699,12 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             border: none;
             box-shadow: 0 2px 4px rgba(0,0,0,0.2);
         }
-
+        
         /* Start Position Buttons */
         .start-position {
             margin-top: 16px;
         }
-        .start-position label {
+        .start-position label { 
             font-weight: 600;
             display: block;
             margin-bottom: 10px;
@@ -675,7 +727,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             transition: all 0.2s ease;
             font-size: 0.95em;
         }
-        .position-btn.selected {
+        .position-btn.selected { 
             background: #012169;
             color: white;
             border-color: #012169;
@@ -694,7 +746,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
     <div class="container">
         <h1>Track LED Pacer</h1>
         <div class="subtitle">Duke University Track & Field</div>
-
+        
         <div class="info-banner">
             <span id="segmentCount">1</span> Segment (<span id="meterLength">5</span>m)
         </div>
@@ -796,7 +848,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                     </div>
                     <button onclick="calculateFromTotal(1)" style="width: 100%; background: #003087; color: white;">Calculate</button>
                 </div>
-
+                
                 <div class="color-section">
                     <label>Color:</label>
                     <div class="color-palette" id="palette1">
@@ -807,7 +859,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                         <div class="color-option" style="background: #FFFFFF; border: 2px solid #dee2e6;" data-led="#FFFFFF" onclick="selectColor(1, '#FFFFFF', this)"></div>
                     </div>
                 </div>
-
+                
                 <div class="start-position">
                     <label>Start Position:</label>
                     <div class="position-grid" id="position1">
@@ -867,7 +919,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                     </div>
                     <button onclick="calculateFromTotal(2)" style="width: 100%; background: #003087; color: white;">Calculate</button>
                 </div>
-
+                
                 <div class="color-section">
                     <label>Color:</label>
                     <div class="color-palette" id="palette2">
@@ -878,7 +930,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                         <div class="color-option" style="background: #FFFFFF; border: 2px solid #dee2e6;" data-led="#FFFFFF" onclick="selectColor(2, '#FFFFFF', this)"></div>
                     </div>
                 </div>
-
+                
                 <div class="start-position">
                     <label>Start Position:</label>
                     <div class="position-grid" id="position2">
@@ -938,7 +990,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                     </div>
                     <button onclick="calculateFromTotal(3)" style="width: 100%; background: #003087; color: white;">Calculate</button>
                 </div>
-
+                
                 <div class="color-section">
                     <label>Color:</label>
                     <div class="color-palette" id="palette3">
@@ -949,7 +1001,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                         <div class="color-option" style="background: #FFFFFF; border: 2px solid #dee2e6;" data-led="#FFFFFF" onclick="selectColor(3, '#FFFFFF', this)"></div>
                     </div>
                 </div>
-
+                
                 <div class="start-position">
                     <label>Start Position:</label>
                     <div class="position-grid" id="position3">
@@ -995,18 +1047,18 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             const startBtn = document.getElementById('startBtn');
             const stopBtn = document.getElementById('stopBtn');
             const statsDisplay = document.getElementById('runningStats');
-
+            
             if (running) {
                 startBtn.classList.add('running');
                 stopBtn.classList.add('active');
                 statsDisplay.classList.add('active');
-
+                
                 if (!startTime) {
                     startTime = Date.now();
                     lapCounts = [0, 0, 0];
                     lastPositions = [0, 0, 0];
                 }
-
+                
                 if (!elapsedInterval) {
                     elapsedInterval = setInterval(updateElapsedTime, 100);
                 }
@@ -1014,7 +1066,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                 startBtn.classList.remove('running');
                 stopBtn.classList.remove('active');
                 statsDisplay.classList.remove('active');
-
+                
                 if (elapsedInterval) {
                     clearInterval(elapsedInterval);
                     elapsedInterval = null;
@@ -1025,39 +1077,39 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
 
         function updateElapsedTime() {
             if (!startTime) return;
-
+            
             const elapsed = Date.now() - startTime;
             const minutes = Math.floor(elapsed / 60000);
             const seconds = Math.floor((elapsed % 60000) / 1000);
-
-            document.getElementById('elapsedTime').textContent =
+            
+            document.getElementById('elapsedTime').textContent = 
                 `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
         }
 
         function updateLapCounts() {
             const trackLength = currentSegments * 5;
             let fastestLap = null;
-
+            
             for (let i = 0; i < pacerPositions.length; i++) {
                 if (!pacerPositions[i].enabled) continue;
-
+                
                 const currentPos = pacerPositions[i].position;
                 const lastPos = lastPositions[i];
-
+                
                 // Check if pacer crossed the start/finish line (0m)
                 if (lastPos > trackLength * 0.8 && currentPos < trackLength * 0.2) {
                     lapCounts[i]++;
                 }
-
+                
                 lastPositions[i] = currentPos;
-
+                
                 // Track fastest lap time
                 const lapTime = parseFloat(document.getElementById(`pace${i+1}Range`).value);
                 if (lapCounts[i] > 0 && (fastestLap === null || lapTime < fastestLap)) {
                     fastestLap = lapTime;
                 }
             }
-
+            
             if (fastestLap !== null) {
                 document.getElementById('fastestLap').textContent = fastestLap.toFixed(1) + 's';
             }
@@ -1067,10 +1119,10 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             const container = document.getElementById('trackContainer');
             const markersDiv = document.getElementById('trackMarkers');
             markersDiv.innerHTML = '';
-
+            
             const trackLength = currentSegments * 5;
             const numMarkers = Math.min(trackLength / 5, 20); // One marker every 5m, max 20
-
+            
             // Add finish line at 0 degrees (top)
             const finishLine = document.createElement('div');
             finishLine.className = 'finish-line';
@@ -1078,22 +1130,22 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             finishLine.style.left = (container.offsetWidth / 2 - 1.5) + 'px';
             finishLine.style.top = (container.offsetHeight / 2 - flRadius - 8) + 'px';
             markersDiv.appendChild(finishLine);
-
+            
             // Add distance markers
             for (let i = 1; i < numMarkers; i++) {
                 const angle = (i / numMarkers) * 2 * Math.PI - Math.PI / 2;
                 const radius = (Math.min(container.offsetWidth, container.offsetHeight) / 2) - 9;
-
+                
                 const marker = document.createElement('div');
                 marker.className = 'distance-marker';
-
+                
                 const x = container.offsetWidth / 2 + radius * Math.cos(angle);
                 const y = container.offsetHeight / 2 + radius * Math.sin(angle);
-
+                
                 marker.style.left = (x - 1) + 'px';
                 marker.style.top = (y - 6) + 'px';
                 marker.style.transform = `rotate(${angle + Math.PI / 2}rad)`;
-
+                
                 markersDiv.appendChild(marker);
             }
         }
@@ -1101,17 +1153,17 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
         function setTimeMode(pacer, mode) {
             const modes = ['lap', 'mile', 'total'];
             const parent = document.querySelector(`#pace${pacer}Enable`).closest('.pacer-card');
-
+            
             parent.querySelectorAll('.time-mode-btn').forEach(btn => btn.classList.remove('active'));
             event.target.classList.add('active');
-
+            
             modes.forEach(m => {
                 const container = document.getElementById(`${m}Mode${pacer}`);
                 if (container) {
                     container.classList.remove('active');
                 }
             });
-
+            
             const activeContainer = document.getElementById(`${mode}Mode${pacer}`);
             if (activeContainer) {
                 activeContainer.classList.add('active');
@@ -1121,42 +1173,42 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
         function calculateFromMile(pacer) {
             const minutes = parseInt(document.getElementById(`mile${pacer}Min`).value) || 0;
             const seconds = parseInt(document.getElementById(`mile${pacer}Sec`).value) || 0;
-
+            
             const totalSeconds = minutes * 60 + seconds;
             const metersPerMile = 1609.34;
             const trackLength = currentSegments * 5;
-
+            
             const secondsPerMeter = totalSeconds / metersPerMile;
             const secondsPerLap = secondsPerMeter * trackLength;
-
+            
             document.getElementById(`pace${pacer}Range`).value = secondsPerLap.toFixed(1);
             document.getElementById(`pace${pacer}Value`).textContent = secondsPerLap.toFixed(1);
-
+            
             setTimeMode(pacer, 'lap');
         }
 
         function calculateFromTotal(pacer) {
             const minutes = parseInt(document.getElementById(`total${pacer}Min`).value) || 0;
             const seconds = parseInt(document.getElementById(`total${pacer}Sec`).value) || 0;
-
+            
             const totalSeconds = minutes * 60 + seconds;
             const trackLength = currentSegments * 5;
-
+            
             const lapsNeeded = prompt(`How many laps for this total time? (Track is ${trackLength}m per lap)`);
             if (!lapsNeeded || lapsNeeded <= 0) return;
-
+            
             const secondsPerLap = totalSeconds / parseFloat(lapsNeeded);
-
+            
             document.getElementById(`pace${pacer}Range`).value = secondsPerLap.toFixed(1);
             document.getElementById(`pace${pacer}Value`).textContent = secondsPerLap.toFixed(1);
-
+            
             setTimeMode(pacer, 'lap');
         }
 
         function updateConnectionStatus(connected) {
             const dot = document.getElementById('statusDot');
             const text = document.getElementById('statusText');
-
+            
             if (connected) {
                 dot.classList.remove('disconnected');
                 text.textContent = 'Connected';
@@ -1188,35 +1240,35 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             const container = document.getElementById('trackContainer');
             const existingPacers = container.querySelectorAll('.track-pacer');
             existingPacers.forEach(p => p.remove());
-
+            
             if (!pacerPositions || pacerPositions.length === 0) return;
-
+            
             const trackLength = currentSegments * 5;
-
+            
             pacerPositions.forEach((pacer, index) => {
                 if (!pacer.enabled) return;
-
+                
                 const positionPercent = (pacer.position % trackLength) / trackLength;
                 const angle = positionPercent * 2 * Math.PI - Math.PI / 2;
-
+                
                 const centerX = container.offsetWidth / 2;
                 const centerY = container.offsetHeight / 2;
                 const radius = (Math.min(container.offsetWidth, container.offsetHeight) / 2) - 30;
-
+                
                 const x = centerX + radius * Math.cos(angle);
                 const y = centerY + radius * Math.sin(angle);
-
+                
                 const pacerEl = document.createElement('div');
                 pacerEl.className = 'track-pacer';
                 pacerEl.style.left = (x - 10) + 'px';
                 pacerEl.style.top = (y - 10) + 'px';
                 pacerEl.style.background = pacer.color;
-
+                
                 const label = document.createElement('div');
                 label.className = 'pacer-label';
                 label.textContent = `P${index + 1}`;
                 pacerEl.appendChild(label);
-
+                
                 container.appendChild(pacerEl);
             });
         }
@@ -1227,12 +1279,12 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                 alert('Please enter a preset name');
                 return;
             }
-
+            
             const preset = {
                 segments: currentSegments,
                 pacers: []
             };
-
+            
             for (let i = 1; i <= 3; i++) {
                 preset.pacers.push({
                     enabled: document.getElementById(`pace${i}Enable`).checked,
@@ -1241,7 +1293,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                     position: selectedPositions[i - 1]
                 });
             }
-
+            
             fetch('/preset/save', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -1259,7 +1311,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                 .then(preset => {
                     document.getElementById('segments').value = preset.segments;
                     updateSegments();
-
+                    
                     preset.pacers.forEach((p, i) => {
                         const idx = i + 1;
                         document.getElementById(`pace${idx}Enable`).checked = p.enabled;
@@ -1267,7 +1319,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                         document.getElementById(`pace${idx}Value`).textContent = p.time;
                         selectedColors[i] = p.color;
                         selectedPositions[i] = p.position;
-
+                        
                         const palette = document.getElementById(`palette${idx}`);
                         palette.querySelectorAll('.color-option').forEach(opt => {
                             opt.classList.remove('selected');
@@ -1276,7 +1328,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                             }
                         });
                     });
-
+                    
                     updatePositionButtons();
                     alert('Preset loaded!');
                 });
@@ -1284,7 +1336,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
 
         function deletePreset(name) {
             if (!confirm(`Delete preset "${name}"?`)) return;
-
+            
             fetch('/preset/delete', {
                 method: 'POST',
                 headers: {'Content-Type': 'text/plain'},
@@ -1299,7 +1351,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                 segments: currentSegments,
                 pacers: []
             };
-
+            
             for (let i = 1; i <= 3; i++) {
                 preset.pacers.push({
                     enabled: document.getElementById(`pace${i}Enable`).checked,
@@ -1308,7 +1360,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                     position: selectedPositions[i - 1]
                 });
             }
-
+            
             downloadPresetFile(preset);
         }
 
@@ -1325,12 +1377,12 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
         function downloadPresetFile(preset) {
             const dataStr = JSON.stringify(preset, null, 2);
             const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-
+            
             const linkElement = document.createElement('a');
             linkElement.setAttribute('href', dataUri);
             linkElement.setAttribute('download', 'track_pacer_' + preset.name + '.json');
             linkElement.click();
-
+            
             // Show feedback
             const originalText = event.target.textContent;
             event.target.textContent = 'Downloaded';
@@ -1342,23 +1394,23 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
         function importPresetFile(event) {
             const file = event.target.files[0];
             if (!file) return;
-
+            
             const reader = new FileReader();
             reader.onload = function(e) {
                 try {
                     const preset = JSON.parse(e.target.result);
-
+                    
                     // Validate preset structure
                     if (!preset.segments || !preset.pacers || preset.pacers.length !== 3) {
                         throw new Error('Invalid preset format');
                     }
-
+                    
                     // Apply the preset
                     document.getElementById('segments').value = preset.segments;
                     currentSegments = preset.segments;
                     updateDisplay();
                     updatePositionButtons();
-
+                    
                     preset.pacers.forEach((p, i) => {
                         const idx = i + 1;
                         document.getElementById(`pace${idx}Enable`).checked = p.enabled;
@@ -1366,7 +1418,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                         document.getElementById(`pace${idx}Value`).textContent = p.time;
                         selectedColors[i] = p.color;
                         selectedPositions[i] = p.position;
-
+                        
                         // Update color palette selection
                         const palette = document.getElementById(`palette${idx}`);
                         palette.querySelectorAll('.color-option').forEach(opt => {
@@ -1376,24 +1428,24 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                             }
                         });
                     });
-
+                    
                     updatePositionButtons();
-
+                    
                     // Update segments on ESP32
                     fetch('/segments', {
                         method: 'POST',
                         headers: {'Content-Type': 'text/plain'},
                         body: 'SET:' + preset.segments
                     });
-
-                    alert('Preset imported successfully!\\n\\nYou can now save it to this device if you want.');
-
+                    
+                    alert('Preset imported successfully!\n\nYou can now save it to this device if you want.');
+                    
                 } catch (error) {
-                    alert('Invalid preset file\\n\\n' + error.message);
+                    alert('Invalid preset file\n\n' + error.message);
                 }
             };
             reader.readAsText(file);
-
+            
             // Reset file input so same file can be imported again
             event.target.value = '';
         }
@@ -1404,12 +1456,12 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                 .then(presets => {
                     const list = document.getElementById('presetList');
                     list.innerHTML = '';
-
+                    
                     if (presets.length === 0) {
                         list.innerHTML = '<div style="text-align: center; color: #666; padding: 20px;">No saved presets</div>';
                         return;
                     }
-
+                    
                     presets.forEach(name => {
                         const item = document.createElement('div');
                         item.className = 'preset-item';
@@ -1429,17 +1481,17 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
         function updatePositionButtons() {
             currentSegments = parseInt(document.getElementById('segments').value);
             let totalMeters = currentSegments * 5;
-
+            
             const positions = [];
             for (let i = 0; i < 4; i++) {
                 const position = Math.round((i / 4) * totalMeters);
                 positions.push(position);
             }
-
+            
             for (let pacer = 1; pacer <= 3; pacer++) {
                 let container = document.getElementById('position' + pacer);
                 container.innerHTML = '';
-
+                
                 positions.forEach((position, index) => {
                     let btn = document.createElement('button');
                     btn.className = 'position-btn' + (position === selectedPositions[pacer - 1] ? ' selected' : '');
@@ -1447,7 +1499,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                     btn.onclick = function() { selectPosition(pacer, position, this); };
                     container.appendChild(btn);
                 });
-
+                
                 if (!positions.includes(selectedPositions[pacer - 1])) {
                     selectedPositions[pacer - 1] = positions[0];
                     setTimeout(() => {
@@ -1487,27 +1539,27 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             updateDisplay();
             updatePositionButtons();
             createTrackMarkers();
-
+            
             fetch('/segments', {
                 method: 'POST',
                 headers: {'Content-Type': 'text/plain'},
                 body: 'SET:' + segments
             });
         }
-
+        
         window.onload = function() {
             updateDisplay();
             updatePositionButtons();
             loadPresetList();
             createTrackMarkers();
-
+            
             // Initialize pacer summaries
             for (let i = 1; i <= 3; i++) {
                 updatePacerSummary(i);
             }
-
+            
             statusCheckInterval = setInterval(checkStatus, 500);
-
+            
             document.getElementById('segments').oninput = function() {
                 updateDisplay();
                 updatePositionButtons();
@@ -1525,7 +1577,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                 document.getElementById('pace3Value').textContent = this.value;
                 updatePacerSummary(3);
             };
-
+            
             // Recreate markers on window resize
             window.addEventListener('resize', createTrackMarkers);
         };
@@ -1535,22 +1587,22 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             updateButtonStates(true);
 
             let cmd = 'START:';
-
+            
             if (document.getElementById('pace1Enable').checked) {
                 let time = document.getElementById('pace1Range').value;
                 cmd += time + ',' + selectedPositions[0] + ',' + selectedColors[0] + '|';
             }
-
+            
             if (document.getElementById('pace2Enable').checked) {
                 let time = document.getElementById('pace2Range').value;
                 cmd += time + ',' + selectedPositions[1] + ',' + selectedColors[1] + '|';
             }
-
+            
             if (document.getElementById('pace3Enable').checked) {
                 let time = document.getElementById('pace3Range').value;
                 cmd += time + ',' + selectedPositions[2] + ',' + selectedColors[2] + '|';
             }
-
+            
             fetch('/command', {
                 method: 'POST',
                 headers: {'Content-Type': 'text/plain'},
@@ -1563,7 +1615,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             updateButtonStates(false);
             pacerPositions = [];
             updateTrackVisualization();
-
+            
             fetch('/command', {
                 method: 'POST',
                 headers: {'Content-Type': 'text/plain'},
@@ -1575,4 +1627,291 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
 </html>
 )rawliteral";
 
-#endif
+void setup() {
+  Serial.begin(115200);
+  
+  preferences.begin("trackpacer", false);
+  
+  FastLED.addLeds<WS2811, LED_PIN, RBG>(leds, MAX_LOGICAL_LEDS); 
+  FastLED.setBrightness(255);
+  FastLED.clear();
+  FastLED.show();
+
+  for (int i = 0; i < MAX_PACERS; i++) {
+    pacers[i].enabled = false;
+    pacers[i].currentPosition = 0;
+    pacers[i].lastUpdate = 0;
+  }
+
+  WiFi.softAP(AP_SSID, AP_PASSWORD);
+  IPAddress IP = WiFi.softAPIP();
+  
+  Serial.print("Connect to: ");
+  Serial.println(AP_SSID);
+  Serial.print("Go to: http://");
+  Serial.println(IP);
+
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/command", HTTP_POST, handleCommand);
+  server.on("/segments", HTTP_POST, handleSegments);
+  server.on("/status", HTTP_GET, handleStatus);
+  server.on("/preset/save", HTTP_POST, handleSavePreset);
+  server.on("/preset/load", HTTP_GET, handleLoadPreset);
+  server.on("/preset/list", HTTP_GET, handleListPresets);
+  server.on("/preset/delete", HTTP_POST, handleDeletePreset);
+  server.begin();
+}
+
+void loop() {
+  server.handleClient();
+  connectedClients = WiFi.softAPgetStationNum();
+  
+  if (systemRunning) {
+    updatePacers();
+    renderLEDs();
+    FastLED.show(); 
+  }
+}
+
+void handleRoot() {
+  server.send(200, "text/html", HTML_PAGE);
+}
+
+void handleStatus() {
+  String json = "{\"running\":";
+  json += systemRunning ? "true" : "false";
+  json += ",\"clients\":";
+  json += connectedClients;
+  json += ",\"positions\":[";
+  
+  for (int i = 0; i < MAX_PACERS; i++) {
+    if (i > 0) json += ",";
+    json += "{\"enabled\":";
+    json += pacers[i].enabled ? "true" : "false";
+    json += ",\"position\":";
+    json += String(pacers[i].currentPosition * 5.0 / LOGICAL_UNITS_PER_SEGMENT, 2);
+    json += ",\"color\":\"";
+    char colorHex[8];
+    sprintf(colorHex, "#%02X%02X%02X", pacers[i].color.r, pacers[i].color.g, pacers[i].color.b);
+    json += colorHex;
+    json += "\"}";
+  }
+  
+  json += "]}";
+  server.send(200, "application/json", json);
+}
+
+void handleSavePreset() {
+  if (server.hasArg("plain")) {
+    String body = server.arg("plain");
+    
+    int nameStart = body.indexOf("\"name\":\"") + 8;
+    int nameEnd = body.indexOf("\"", nameStart);
+    String name = body.substring(nameStart, nameEnd);
+    
+    int dataStart = body.indexOf("\"data\":\"") + 8;
+    int dataEnd = body.lastIndexOf("\"");
+    String data = body.substring(dataStart, dataEnd);
+    
+    data.replace("\\\"", "\"");
+    
+    String key = "preset_" + name;
+    preferences.putString(key.c_str(), data);
+    
+    Serial.println("Saved preset: " + name);
+    server.send(200, "text/plain", "OK");
+  } else {
+    server.send(400, "text/plain", "No data");
+  }
+}
+
+void handleLoadPreset() {
+  if (server.hasArg("name")) {
+    String name = server.arg("name");
+    String key = "preset_" + name;
+    String data = preferences.getString(key.c_str(), "");
+    
+    if (data.length() > 0) {
+      server.send(200, "application/json", data);
+    } else {
+      server.send(404, "text/plain", "Preset not found");
+    }
+  } else {
+    server.send(400, "text/plain", "No name provided");
+  }
+}
+
+void handleListPresets() {
+  String json = "[";
+  bool first = true;
+  
+  preferences.begin("trackpacer", true);
+  
+  for (int i = 0; i < 20; i++) {
+    String key = "preset_" + String(i);
+    if (preferences.isKey(key.c_str())) {
+      if (!first) json += ",";
+      String name = key.substring(7);
+      json += "\"" + name + "\"";
+      first = false;
+    }
+  }
+  
+  preferences.end();
+  preferences.begin("trackpacer", false);
+  
+  json += "]";
+  server.send(200, "application/json", json);
+}
+
+void handleDeletePreset() {
+  if (server.hasArg("plain")) {
+    String name = server.arg("plain");
+    String key = "preset_" + name;
+    preferences.remove(key.c_str());
+    
+    Serial.println("Deleted preset: " + name);
+    server.send(200, "text/plain", "OK");
+  } else {
+    server.send(400, "text/plain", "No data");
+  }
+}
+
+void handleSegments() {
+    if (server.hasArg("plain")) {
+        String command = server.arg("plain");
+        
+        if (command.startsWith("SET:")) {
+            int newSegments = command.substring(4).toInt();
+            
+            if (newSegments >= 1 && newSegments <= 80) {
+                TOTAL_SEGMENTS = newSegments;
+                current_NUM_LEDS = TOTAL_SEGMENTS * LOGICAL_UNITS_PER_SEGMENT;
+                
+                systemRunning = false;
+                FastLED.clear();
+                FastLED.show();
+
+                Serial.print("Segments set to: ");
+                Serial.println(TOTAL_SEGMENTS);
+                Serial.print("Total Logical LEDs (for pacing): ");
+                Serial.println(current_NUM_LEDS);
+            }
+        }
+        server.send(200, "text/plain", "OK");
+    } else {
+        server.send(400, "text/plain", "No data");
+    }
+}
+
+void handleCommand() {
+  if (server.hasArg("plain")) {
+    String command = server.arg("plain");
+    
+    if (command.startsWith("START:")) {
+      parseStartCommand(command);
+      systemRunning = true;
+    } else if (command == "STOP") {
+      systemRunning = false;
+      FastLED.clear();
+      FastLED.show();
+    }
+    
+    server.send(200, "text/plain", "OK");
+  } else {
+    server.send(400, "text/plain", "No data");
+  }
+}
+
+void parseStartCommand(String cmd) {
+  cmd = cmd.substring(6);
+  
+  int pacerIndex = 0;
+  int lastPos = 0;
+  
+  for (int i = 0; i < MAX_PACERS; i++) {
+    pacers[i].enabled = false;
+  }
+  
+  while (cmd.indexOf('|', lastPos) != -1 && pacerIndex < MAX_PACERS) {
+    int pipePos = cmd.indexOf('|', lastPos);
+    String pacerData = cmd.substring(lastPos, pipePos);
+    
+    int comma1 = pacerData.indexOf(',');
+    int comma2 = pacerData.indexOf(',', comma1 + 1);
+    
+    if (comma1 != -1 && comma2 != -1) {
+      float timePerLap = pacerData.substring(0, comma1).toFloat();
+      int startMeters = pacerData.substring(comma1 + 1, comma2).toInt();
+      String colorHex = pacerData.substring(comma2 + 1);
+      
+      pacers[pacerIndex].enabled = true;
+      pacers[pacerIndex].timePerLap = timePerLap;
+      pacers[pacerIndex].startPosition = startMeters;
+      
+      float unitsPerMeter = (float)LOGICAL_UNITS_PER_SEGMENT / 5.0; 
+      pacers[pacerIndex].currentPosition = startMeters * unitsPerMeter;
+      pacers[pacerIndex].color = hexToColor(colorHex);
+      pacers[pacerIndex].lastUpdate = millis();
+      
+      pacerIndex++;
+    }
+    
+    lastPos = pipePos + 1;
+  }
+}
+
+CRGB hexToColor(String hex) {
+  if (hex.startsWith("#")) {
+    hex = hex.substring(1);
+  }
+  
+  long number = strtol(hex.c_str(), NULL, 16);
+  int r = (number >> 16) & 0xFF;
+  int g = (number >> 8) & 0xFF;
+  int b = number & 0xFF;
+  
+  return CRGB(r, g, b);
+}
+
+void updatePacers() {
+  unsigned long now = millis();
+  
+  for (int i = 0; i < MAX_PACERS; i++) {
+    if (!pacers[i].enabled) continue;
+    
+    if (pacers[i].timePerLap <= 0) {
+        pacers[i].timePerLap = 1.0; 
+    }
+    
+    unsigned long elapsed = now - pacers[i].lastUpdate;
+    pacers[i].lastUpdate = now;
+    
+    float unitsPerSecond = (float)current_NUM_LEDS / pacers[i].timePerLap;
+    float unitsMoved = unitsPerSecond * (elapsed / 1000.0);
+    
+    pacers[i].currentPosition += unitsMoved;
+    
+    pacers[i].currentPosition = fmod(pacers[i].currentPosition, (float)current_NUM_LEDS);
+  }
+}
+
+void renderLEDs() {
+  FastLED.clear();
+  
+  for (int i = 0; i < MAX_PACERS; i++) {
+    if (!pacers[i].enabled) continue;
+    
+    int startUnit = (int)pacers[i].currentPosition;
+    
+    for (int j = 0; j < LEDS_PER_SEGMENT; j++) {
+      int unitIndex = (startUnit + j) % current_NUM_LEDS;
+      
+      leds[unitIndex] = pacers[i].color;
+    }
+
+    for (int k = current_NUM_LEDS; k < MAX_LOGICAL_LEDS; k++) {
+        leds[k] = CRGB::Black;
+    }
+  }
+}
