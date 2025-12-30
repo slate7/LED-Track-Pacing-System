@@ -1,0 +1,74 @@
+MIGRATION NOTES
+===============
+
+The project has been restructured into modular files for easier development.
+
+IMPORTANT NOTES:
+================
+
+1. web_page.h IS INCOMPLETE!
+   - The current web_page.h only contains HTML and CSS
+   - It is MISSING the JavaScript code (600+ lines)
+   - The complete HTML with JavaScript is in the original TrackPacingSystem.ino file (lines 59-1628)
+
+2. TWO VERSIONS EXIST:
+   - TrackPacingSystem.ino - ORIGINAL (fully functional, single file)
+   - TrackPacingSystem_new.ino - NEW MODULAR VERSION (needs web_page.h completed)
+
+3. TO COMPLETE THE MIGRATION:
+   - Copy the <script>...</script> section from TrackPacingSystem.ino (lines 1019-1625)
+   - Paste it into web_page.h before the closing </body> tag
+   - Replace the line: <script src="web/script.js"></script>
+   - With the full inline JavaScript code
+
+4. FILE STATUS:
+   ✓ config.h - Complete
+   ✓ pacer.h - Complete
+   ✓ led_control.h - Complete
+   ✓ web_server.h - Complete
+   ⚠ web_page.h - INCOMPLETE (missing JavaScript)
+   ✓ TrackPacingSystem_new.ino - Complete (but depends on web_page.h)
+   ✓ .gitignore - Complete
+   ✓ README.md - Complete
+
+5. CURRENT STATE:
+   - Original single file (TrackPacingSystem.ino) is FULLY FUNCTIONAL
+   - New modular version needs web_page.h JavaScript to work
+   - Once fixed, you can delete the original .ino and rename _new.ino
+
+6. WHY JAVASCRIPT MUST BE EMBEDDED:
+   - ESP32 serves a single HTTP response with the complete HTML
+   - No separate file serving (would need SPIFFS filesystem)
+   - All HTML/CSS/JS must be in one string in PROGMEM
+
+NEXT STEPS TO USE NEW STRUCTURE:
+=================================
+
+Option A: Complete web_page.h
+1. Edit web_page.h
+2. Copy JavaScript from original file (lines 1019-1625)
+3. Remove the line: <script src="web/script.js"></script>
+4. Paste the JavaScript inline before </body>
+5. Test with TrackPacingSystem_new.ino
+6. Delete original TrackPacingSystem.ino
+7. Rename TrackPacingSystem_new.ino to TrackPacingSystem.ino
+
+Option B: Keep using original for now
+1. Continue using TrackPacingSystem.ino
+2. Complete the migration when time permits
+3. The new header files are ready and waiting
+
+FILE STRUCTURE OVERVIEW:
+========================
+
+TrackPacingSystem/
+├── TrackPacingSystem.ino (ORIGINAL - USE THIS ONE)
+├── TrackPacingSystem_new.ino (NEW - needs web_page.h fixed)
+├── config.h
+├── pacer.h
+├── led_control.h
+├── web_server.h
+├── web_page.h (⚠ INCOMPLETE!)
+├── .gitignore
+├── README.md
+└── MIGRATION_NOTES.txt (this file)

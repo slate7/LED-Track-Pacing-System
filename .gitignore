@@ -1,0 +1,41 @@
+# Arduino build files
+build/
+*.hex
+*.elf
+*.bin
+*.map
+
+# IDE files
+.vscode/
+.idea/
+*.code-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*~
+*.tmp
+*.bak
+*.swp
+
+# Arduino Library Manager
+libraries/
+
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Compiled Python files (if using scripts)
+*.pyc
+__pycache__/
+
+# Node modules (if using web development tools)
+node_modules/
+
+# Environment files
+.env
+*.local
