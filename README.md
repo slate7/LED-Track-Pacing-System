@@ -18,9 +18,12 @@ An ESP32-based LED pacing system for track and field training at Duke University
 ## Hardware Requirements
 
 - ESP32 development board
-- WS2811 LED strip (RGB color order: RBG)
-- 5V power supply (appropriate for LED strip length)
-- Data line connected to GPIO pin 15
+- 24V WS2811 LED strip with 5V data input (RGB color order: RBG)
+- Custom power box with:
+  - 24V AC power supply (sized for LED strip length)
+  - Step-down converter (24V to 5V for ESP32)
+  - Integrated wiring for power distribution
+- Data line connected to GPIO pin 12
 
 ## Software Requirements
 
@@ -30,6 +33,26 @@ An ESP32-based LED pacing system for track and field training at Duke University
   - `WebServer.h` (ESP32 built-in)
   - `FastLED` ([install from Library Manager](https://github.com/FastLED/FastLED))
   - `Preferences.h` (ESP32 built-in)
+
+## Wiring
+
+### Power Box Configuration
+The system uses a custom-built power box containing:
+- **24V AC power supply** (plugged into wall outlet)
+- **Step-down converter** (24V → 5V for ESP32)
+- **Power distribution:**
+  - 24V output to LED strip VCC/GND
+  - 5V output to ESP32 VIN/GND
+  - Common ground shared between all components
+
+### Data Connection
+- Connect ESP32 GPIO 12 to LED strip DATA/DIN (5V data input)
+- LED strips accept 5V data signal despite running on 24V power
+
+### Safety Notes
+- All wiring is integrated in the power box
+- Do NOT connect ESP32 directly to 24V - use step-down converter
+- Ensure proper grounding between all components
 
 ## Installation
 
@@ -114,7 +137,7 @@ const char* AP_PASSWORD = "pacer2024";
 ### LED Configuration
 Edit in `config.h`:
 ```cpp
-#define LED_PIN 15                    // Data pin
+#define LED_PIN 12                    // Data pin
 #define LOGICAL_UNITS_PER_SEGMENT 50  // LEDs per 5-meter segment
 #define LEDS_PER_SEGMENT 20            // Length of pacer in LEDs
 #define MAX_PACERS 3                  // Number of simultaneous pacers
@@ -136,9 +159,12 @@ Change `WS2811` to your LED type (`WS2812B`, `APA102`, etc.) and adjust color or
 - Try forgetting the network and reconnecting
 
 ### LEDs not lighting up
-- Check power supply voltage and amperage
-- Verify data pin connection (GPIO 15)
-- Confirm LED strip type matches code configuration
+- Verify power box is plugged into wall outlet and switched on
+- Check that step-down converter is outputting 5V to ESP32
+- Verify data pin connection to GPIO 12 (5V data input on LED strip)
+- Confirm LED strip type matches code configuration (WS2811, RBG color order)
+- Check that 24V supply amperage is sufficient for LED strip length
+- Verify common ground connections in power box
 - Test with a simple FastLED example sketch first
 
 ### Web interface not loading

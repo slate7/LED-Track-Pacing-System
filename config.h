@@ -6,7 +6,9 @@ const char* AP_SSID = "TrackPacer";
 const char* AP_PASSWORD = "pacer2024";
 
 // LED Configuration
-#define LED_PIN 15
+// Hardware: 24V WS2811 LED strips with 5V data input
+// Power: 24V AC adapter with step-down converter to 5V for ESP32
+#define LED_PIN 12
 
 // --- Scalable Configuration ---
 #define LOGICAL_UNITS_PER_SEGMENT 50  // 50 chips per 5-meter segment
