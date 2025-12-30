@@ -152,13 +152,9 @@ Change `WS2811` to your LED type (`WS2812B`, `APA102`, etc.) and adjust color or
 - Check `LOGICAL_UNITS_PER_SEGMENT` matches your LED density
 - Ensure power supply can handle the full LED strip
 
-## Contributing
-
-Contributions are welcome! Please feel free to submit issues or pull requests.
-
 ## License
 
-This project is open source. Feel free to use and modify for your needs.
+Open source
 
 ## Credits
 
